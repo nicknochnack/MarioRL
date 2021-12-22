@@ -1,0 +1,343 @@
+{
+ "cells": [
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "# 1. Setup Mario"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "tags": []
+   },
+   "outputs": [],
+   "source": [
+    "!pip install gym_super_mario_bros==7.3.0 nes_py"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Import the game\n",
+    "import gym_super_mario_bros\n",
+    "# Import the Joypad wrapper\n",
+    "from nes_py.wrappers import JoypadSpace\n",
+    "# Import the SIMPLIFIED controls\n",
+    "from gym_super_mario_bros.actions import SIMPLE_MOVEMENT"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Setup game\n",
+    "env = gym_super_mario_bros.make('SuperMarioBros-v0')\n",
+    "env = JoypadSpace(env, SIMPLE_MOVEMENT)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "tags": []
+   },
+   "outputs": [],
+   "source": [
+    "# Create a flag - restart or not\n",
+    "done = True\n",
+    "# Loop through each frame in the game\n",
+    "for step in range(100000): \n",
+    "    # Start the game to begin with \n",
+    "    if done: \n",
+    "        # Start the gamee\n",
+    "        env.reset()\n",
+    "    # Do random actions\n",
+    "    state, reward, done, info = env.step(env.action_space.sample())\n",
+    "    # Show the game on the screen\n",
+    "    env.render()\n",
+    "# Close the game\n",
+    "env.close()"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "# 2. Preprocess Environment"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "tags": []
+   },
+   "outputs": [],
+   "source": [
+    "# Install pytorch\n",
+    "!pip install torch==1.10.1+cu113 torchvision==0.11.2+cu113 torchaudio===0.10.1+cu113 -f https://download.pytorch.org/whl/cu113/torch_stable.html"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "tags": []
+   },
+   "outputs": [],
+   "source": [
+    "# Install stable baselines for RL stuff\n",
+    "!pip install stable-baselines3[extra]"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Import Frame Stacker Wrapper and GrayScaling Wrapper\n",
+    "from gym.wrappers import GrayScaleObservation\n",
+    "# Import Vectorization Wrappers\n",
+    "from stable_baselines3.common.vec_env import VecFrameStack, DummyVecEnv\n",
+    "# Import Matplotlib to show the impact of frame stacking\n",
+    "from matplotlib import pyplot as plt"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# 1. Create the base environment\n",
+    "env = gym_super_mario_bros.make('SuperMarioBros-v0')\n",
+    "# 2. Simplify the controls \n",
+    "env = JoypadSpace(env, SIMPLE_MOVEMENT)\n",
+    "# 3. Grayscale\n",
+    "env = GrayScaleObservation(env, keep_dim=True)\n",
+    "# 4. Wrap inside the Dummy Environment\n",
+    "env = DummyVecEnv([lambda: env])\n",
+    "# 5. Stack the frames\n",
+    "env = VecFrameStack(env, 4, channels_order='last')"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "state = env.reset()"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "state, reward, done, info = env.step([5])"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "plt.figure(figsize=(20,16))\n",
+    "for idx in range(state.shape[3]):\n",
+    "    plt.subplot(1,4,idx+1)\n",
+    "    plt.imshow(state[0][:,:,idx])\n",
+    "plt.show()"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "# 3. Train the RL Model"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Import os for file path management\n",
+    "import os \n",
+    "# Import PPO for algos\n",
+    "from stable_baselines3 import PPO\n",
+    "# Import Base Callback for saving models\n",
+    "from stable_baselines3.common.callbacks import BaseCallback"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "jupyter": {
+     "source_hidden": true
+    },
+    "tags": []
+   },
+   "outputs": [],
+   "source": [
+    "class TrainAndLoggingCallback(BaseCallback):\n",
+    "\n",
+    "    def __init__(self, check_freq, save_path, verbose=1):\n",
+    "        super(TrainAndLoggingCallback, self).__init__(verbose)\n",
+    "        self.check_freq = check_freq\n",
+    "        self.save_path = save_path\n",
+    "\n",
+    "    def _init_callback(self):\n",
+    "        if self.save_path is not None:\n",
+    "            os.makedirs(self.save_path, exist_ok=True)\n",
+    "\n",
+    "    def _on_step(self):\n",
+    "        if self.n_calls % self.check_freq == 0:\n",
+    "            model_path = os.path.join(self.save_path, 'best_model_{}'.format(self.n_calls))\n",
+    "            self.model.save(model_path)\n",
+    "\n",
+    "        return True"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "CHECKPOINT_DIR = './train/'\n",
+    "LOG_DIR = './logs/'"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "jupyter": {
+     "source_hidden": true
+    },
+    "tags": []
+   },
+   "outputs": [],
+   "source": [
+    "# Setup model saving callback\n",
+    "callback = TrainAndLoggingCallback(check_freq=10000, save_path=CHECKPOINT_DIR)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# This is the AI model started\n",
+    "model = PPO('CnnPolicy', env, verbose=1, tensorboard_log=LOG_DIR, learning_rate=0.000001, \n",
+    "            n_steps=512) "
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "tags": []
+   },
+   "outputs": [],
+   "source": [
+    "# Train the AI model, this is where the AI model starts to learn\n",
+    "model.learn(total_timesteps=1000000, callback=callback)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "model.save('thisisatestmodel')"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "# 4. Test it Out"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Load model\n",
+    "model = PPO.load('./train/best_model_1000000')"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "state = env.reset()"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Start the game \n",
+    "state = env.reset()\n",
+    "# Loop through the game\n",
+    "while True: \n",
+    "    \n",
+    "    action, _ = model.predict(state)\n",
+    "    state, reward, done, info = env.step(action)\n",
+    "    env.render()"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  }
+ ],
+ "metadata": {
+  "kernelspec": {
+   "display_name": "mario",
+   "language": "python",
+   "name": "mario"
+  },
+  "language_info": {
+   "codemirror_mode": {
+    "name": "ipython",
+    "version": 3
+   },
+   "file_extension": ".py",
+   "mimetype": "text/x-python",
+   "name": "python",
+   "nbconvert_exporter": "python",
+   "pygments_lexer": "ipython3",
+   "version": "3.7.3"
+  }
+ },
+ "nbformat": 4,
+ "nbformat_minor": 4
+}
